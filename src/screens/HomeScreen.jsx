@@ -43,6 +43,15 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
     // Для адаптивного strokeWidth
     const [strokeWidth, setStrokeWidth] = useState(10);
 
+    // Отладочная информация
+    const [debugInfo, setDebugInfo] = useState({
+        wsUrl: '',
+        connectionAttempts: 0,
+        lastError: '',
+        serverReachable: false,
+        websocketState: 'CONNECTING'
+    });
+
     // Храним WebSocket в ref, чтобы избежать лишних ре-рендеров
     const socketRef = useRef(null);
     const reconnectTimerRef = useRef(null);
@@ -55,39 +64,84 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
     // ID для toast уведомления
     const toastId = "reconnect-toast";
 
+    // Функция проверки доступности сервера
+    const checkServerHealth = async () => {
+        try {
+            console.log("🔍 Проверка доступности WebSocket сервера...");
+
+            // Проверяем доступность WebSocket сервера
+            const response = await fetch('https://tracking.belektech.kg/health', {
+                method: 'GET',
+                mode: 'cors' // Используем CORS для проверки
+            }).catch(() => {
+                // Если /health недоступен, пробуем основной домен
+                return fetch('https://tracking.belektech.kg/', {
+                    method: 'HEAD',
+                    mode: 'no-cors'
+                });
+            });
+
+            console.log("✅ WebSocket сервер отвечает");
+            setDebugInfo(prev => ({ ...prev, serverReachable: true }));
+
+        } catch (error) {
+            console.error("❌ WebSocket сервер недоступен:", error);
+            setDebugInfo(prev => ({
+                ...prev,
+                serverReachable: false,
+                lastError: error.message
+            }));
+        }
+    };
+
     // Инициализируем ID заказа один раз
     useEffect(() => {
+        console.log("=== ДИАГНОСТИКА ID ===");
+        console.log("propWebsocketId:", propWebsocketId);
+        console.log("window.location.href:", window.location.href);
+        console.log("window.location.hash:", window.location.hash);
+        console.log("window.location.search:", window.location.search);
+        console.log("window.location.pathname:", window.location.pathname);
+
         let wsId = propWebsocketId;
 
         if (!wsId) {
             // Проверяем hash в URL
             if (window.location.hash && window.location.hash.length > 1) {
                 wsId = window.location.hash.substring(1);
-                console.log("ID получен из hash:", wsId);
+                console.log("✅ ID получен из hash:", wsId);
             }
 
             // Проверяем query параметры
             if (!wsId) {
                 const urlParams = new URLSearchParams(window.location.search);
                 wsId = urlParams.get('id');
-                console.log("ID получен из query params:", wsId);
+                console.log("🔍 Проверка query params:", urlParams.toString());
+                console.log("✅ ID получен из query params:", wsId);
             }
 
-            // Проверяем, не находимся ли мы на пути /track/ID
-            if (!wsId && window.location.pathname.startsWith('/track/')) {
+            // Проверяем путь /track/ID
+            if (!wsId && window.location.pathname.includes('/track/')) {
                 const pathParts = window.location.pathname.split('/');
-                if (pathParts.length >= 3) {
-                    wsId = pathParts[2];
-                    console.log("ID получен из path:", wsId);
+                console.log("🔍 Части пути:", pathParts);
+                for (let i = 0; i < pathParts.length; i++) {
+                    if (pathParts[i] === 'track' && pathParts[i + 1]) {
+                        wsId = pathParts[i + 1];
+                        console.log("✅ ID получен из path:", wsId);
+                        break;
+                    }
                 }
             }
         }
 
         if (wsId) {
-            console.log("ID заказа установлен:", wsId);
+            console.log("🎯 Итоговый ID заказа:", wsId);
             websocketIdRef.current = wsId;
+
+            // Проверяем доступность сервера
+            checkServerHealth();
         } else {
-            console.error('ID заказа не найден');
+            console.error('❌ ID заказа не найден');
             setError('Не удалось найти ID заказа. Пожалуйста, отсканируйте QR-код снова.');
             setLoading(false);
         }
@@ -100,6 +154,8 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
         processingDataRef.current = true;
 
         try {
+            console.log("📦 Обработка полученных данных:", data);
+
             // Преобразуем данные перед сохранением в state
             const processedData = {
                 id: data.id || 0,
@@ -127,6 +183,7 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
                 if (JSON.stringify(prev) === JSON.stringify(processedData)) {
                     return prev; // Нет изменений
                 }
+                console.log("🔄 Обновление данных заказа");
                 return processedData;
             });
 
@@ -157,6 +214,7 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
 
         } catch (error) {
             console.error('Ошибка обработки данных:', error);
+            setDebugInfo(prev => ({ ...prev, lastError: error.message }));
         } finally {
             processingDataRef.current = false;
         }
@@ -164,7 +222,12 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
 
     // Функция для создания WebSocket соединения
     const createWebSocketConnection = useCallback(() => {
-        if (!websocketIdRef.current) return;
+        if (!websocketIdRef.current) {
+            console.error("❌ Нет websocketId для подключения");
+            return;
+        }
+
+        console.log("=== СОЗДАНИЕ WEBSOCKET ===");
 
         // Очищаем предыдущие таймеры и соединения
         if (connectionTimeoutRef.current) {
@@ -172,6 +235,7 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
         }
 
         if (socketRef.current) {
+            console.log("🧹 Закрываем предыдущее соединение");
             socketRef.current.onopen = null;
             socketRef.current.onmessage = null;
             socketRef.current.onerror = null;
@@ -179,68 +243,106 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
             socketRef.current.close();
         }
 
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host;
-        const wsUrl = `${protocol}//${host}/ws/order/${websocketIdRef.current}/`;
+        // Правильный WebSocket URL для вашей архитектуры
+        const wsUrl = `wss://tracking.belektech.kg/ws/order/${websocketIdRef.current}/`;
 
-        // const wsUrl = `wss://tracking.belektech.kg/ws/order/${websocketIdRef.current}/`;
-        // console.log('Подключение к WebSocket:', wsUrl);
+        console.log('🔗 URL для подключения:', wsUrl);
+
+        setDebugInfo(prev => ({
+            ...prev,
+            wsUrl,
+            connectionAttempts: prev.connectionAttempts + 1,
+            websocketState: 'CONNECTING'
+        }));
 
         try {
+            console.log("🚀 Создаем WebSocket...");
             socketRef.current = new WebSocket(wsUrl);
-            console.log('WebSocket создан');
+            console.log("✅ WebSocket объект создан");
+
+            // Логируем состояние WebSocket
+            console.log("📊 Начальное состояние WebSocket:", socketRef.current.readyState);
+
         } catch (err) {
-            console.error('Ошибка создания WebSocket:', err);
+            console.error('❌ Ошибка создания WebSocket:', err);
+            setDebugInfo(prev => ({
+                ...prev,
+                lastError: err.message,
+                websocketState: 'ERROR'
+            }));
             setError('Не удалось подключиться к серверу. Пожалуйста, проверьте соединение и попробуйте снова.');
             setLoading(false);
             return;
         }
 
-        // Устанавливаем таймаут на подключение
+        // Устанавливаем таймаут на подключение (увеличиваем до 15 секунд)
         connectionTimeoutRef.current = setTimeout(() => {
+            console.error('⏰ Превышено время ожидания WebSocket подключения');
+            console.log("📊 Состояние WebSocket при таймауте:", socketRef.current?.readyState);
+
             if (!connected) {
-                console.error('Превышено время ожидания WebSocket подключения');
+                setDebugInfo(prev => ({
+                    ...prev,
+                    websocketState: 'TIMEOUT',
+                    lastError: 'Connection timeout'
+                }));
+
                 socketRef.current?.close();
 
-                // Пробуем переподключиться, если не превысили максимальное количество попыток
                 if (reconnectAttempt < maxReconnectAttempts) {
-                    console.log(`Попытка переподключения ${reconnectAttempt + 1} из ${maxReconnectAttempts}`);
+                    console.log(`🔄 Попытка переподключения ${reconnectAttempt + 1} из ${maxReconnectAttempts}`);
                     setReconnectAttempt(prev => prev + 1);
                 } else {
                     setError('Превышено время ожидания подключения. Пожалуйста, попробуйте позже.');
                     setLoading(false);
                 }
             }
-        }, 10000); // 10 секунд таймаут
+        }, 15000); // Увеличиваем таймаут до 15 секунд
 
         // Успешное подключение
-        socketRef.current.onopen = () => {
-            console.log('WebSocket соединение установлено');
+        socketRef.current.onopen = (event) => {
+            console.log('🎉 WebSocket соединение установлено!');
+            console.log('📊 Событие onopen:', event);
+            console.log('📊 Состояние WebSocket:', socketRef.current.readyState);
+
             clearTimeout(connectionTimeoutRef.current);
             setConnected(true);
             setLoading(false);
-            setReconnectAttempt(0); // Сбрасываем счетчик попыток
+            setReconnectAttempt(0);
+            setDebugInfo(prev => ({
+                ...prev,
+                lastError: '',
+                websocketState: 'OPEN'
+            }));
         };
 
         // Получение сообщений
         socketRef.current.onmessage = (event) => {
+            console.log('📨 Получено сообщение:', event.data);
             try {
                 const data = JSON.parse(event.data);
-                console.log('Получены данные:', data);
+                console.log('📦 Распарсенные данные:', data);
                 processOrderData(data);
             } catch (error) {
-                console.error('Ошибка обработки данных:', error);
+                console.error('❌ Ошибка обработки данных:', error);
+                setDebugInfo(prev => ({ ...prev, lastError: error.message }));
             }
         };
 
         // Обработка ошибок
         socketRef.current.onerror = (error) => {
-            console.error('Ошибка WebSocket:', error);
-            setConnected(false);
+            console.error('❌ Ошибка WebSocket:', error);
+            console.log('📊 Состояние WebSocket при ошибке:', socketRef.current?.readyState);
 
-            // При ошибке WebSocket попытаемся переподключиться
+            setConnected(false);
+            setDebugInfo(prev => ({
+                ...prev,
+                lastError: 'WebSocket error occurred',
+                websocketState: 'ERROR'
+            }));
+
             if (reconnectAttempt < maxReconnectAttempts) {
-                console.log(`Ошибка соединения. Попытка переподключения ${reconnectAttempt + 1} из ${maxReconnectAttempts}`);
+                console.log(`🔄 Ошибка соединения. Попытка переподключения ${reconnectAttempt + 1} из ${maxReconnectAttempts}`);
                 setReconnectAttempt(prev => prev + 1);
             } else {
                 setError('Произошла ошибка при подключении к серверу. Пожалуйста, попробуйте позже.');
@@ -250,15 +352,20 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
 
         // Обработка закрытия соединения
         socketRef.current.onclose = (event) => {
-            console.log(`WebSocket соединение закрыто. Код: ${event.code}, Причина: ${event.reason}`);
+            console.log('🔚 WebSocket соединение закрыто');
+            console.log(`📊 Код: ${event.code}, Причина: ${event.reason}`);
+            console.log('📊 wasClean:', event.wasClean);
+
             setConnected(false);
+            setDebugInfo(prev => ({
+                ...prev,
+                websocketState: 'CLOSED',
+                lastError: `Closed: ${event.code} - ${event.reason}`
+            }));
 
-            // Проверяем код закрытия соединения
             if (event.code === 1000) {
-                // Код 1000 означает нормальное закрытие - ссылка недействительна
-                console.log('Получен код 1000: ссылка недействительна');
+                console.log('⚠️ Получен код 1000: ссылка недействительна');
 
-                // Очищаем все таймеры
                 if (reconnectTimerRef.current) {
                     clearTimeout(reconnectTimerRef.current);
                 }
@@ -266,10 +373,8 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
                     clearTimeout(connectionTimeoutRef.current);
                 }
 
-                // Устанавливаем флаг, что больше не нужно пытаться подключиться
-                setReconnectAttempt(maxReconnectAttempts + 1); // Значение больше максимального
+                setReconnectAttempt(maxReconnectAttempts + 1);
 
-                // Показываем уведомление пользователю
                 toast.error('Ссылка недействительна. Подключение прекращено.', {
                     position: "top-center",
                     autoClose: 5000,
@@ -279,17 +384,13 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
                     draggable: true,
                 });
 
-                // Прекращаем состояние загрузки и показываем ошибку
                 setLoading(false);
                 setError('Ссылка недействительна. Пожалуйста, отсканируйте QR-код снова.');
-
-                return; // Выходим из функции, чтобы не запускать попытки переподключения
+                return;
             }
 
-            // При закрытии WebSocket пытаемся переподключиться (только если это не код 1000)
             if (reconnectAttempt < maxReconnectAttempts) {
-                // Добавляем задержку перед переподключением
-                console.log(`Соединение закрыто. Попытка переподключения ${reconnectAttempt + 1} из ${maxReconnectAttempts}`);
+                console.log(`🔄 Соединение закрыто. Попытка переподключения ${reconnectAttempt + 1} из ${maxReconnectAttempts}`);
 
                 if (reconnectTimerRef.current) {
                     clearTimeout(reconnectTimerRef.current);
@@ -297,7 +398,7 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
 
                 reconnectTimerRef.current = setTimeout(() => {
                     setReconnectAttempt(prev => prev + 1);
-                }, 3000); // 3-секундная задержка перед переподключением
+                }, 3000);
             } else if (loading) {
                 setError('Соединение закрыто. Не удалось получить данные заказа.');
                 setLoading(false);
@@ -343,7 +444,7 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
 
                 setProgress(newProgress);
                 setRemainingTime(remainingMins);
-                console.log(remainingTime)
+                console.log('⏰ Обновление времени:', remainingMins);
             };
 
             updateTime(); // Вызываем сразу, чтобы не ждать 1 минуту
@@ -355,7 +456,7 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
 
     // Уведомление о переподключении
     useEffect(() => {
-        if (!connected && !toast.isActive(toastId)) {
+        if (!connected && !toast.isActive(toastId) && reconnectAttempt > 0) {
             toast.warn("Переподключение...", {
                 toastId,
                 position: "top-center",
@@ -368,13 +469,13 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
         } else if (connected) {
             toast.dismiss(toastId);
         }
-    }, [connected, toastId]);
+    }, [connected, toastId, reconnectAttempt]);
 
     useEffect(() => {
         // Проверка на изменение статуса и вывод success toast
-        if (orderData.status === "completed" && !toast.isActive(toastId)) {
+        if (orderData.status === "completed" && connected && !toast.isActive('completed-toast')) {
             toast.success("Ваша машина готова!", {
-                toastId,
+                toastId: 'completed-toast',
                 position: "top-center",
                 autoClose: 5000, // Закрывается через 5 секунд
                 hideProgressBar: false,
@@ -383,7 +484,7 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
                 className: "bg-green-100 text-green-600 text-xs text-center rounded-full px-4 py-1",
             });
         }
-    }, [orderData.status, toastId]);
+    }, [orderData.status, connected]);
 
     // Обновление strokeWidth для адаптивного дизайна
     useEffect(() => {
@@ -457,11 +558,63 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
                     <div className="my-8">
                         <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
                         <p className="text-gray-600">Загрузка данных заказа...</p>
+
+                        {/* ОТЛАДОЧНАЯ ИНФОРМАЦИЯ */}
+                        <div className="mt-4 p-3 bg-gray-100 rounded text-xs text-left overflow-auto max-h-40">
+                            <div className="mb-2"><strong>WebSocket ID:</strong> {websocketIdRef.current || '❌ НЕ НАЙДЕН'}</div>
+                            <div className="mb-2"><strong>URL:</strong> {debugInfo.wsUrl || 'Не установлен'}</div>
+                            <div className="mb-2"><strong>Состояние WS:</strong> {debugInfo.websocketState}</div>
+                            <div className="mb-2"><strong>Попыток подключения:</strong> {debugInfo.connectionAttempts}</div>
+                            <div className="mb-2"><strong>Сервер доступен:</strong> {debugInfo.serverReachable ? '✅ Да' : '❌ Нет'}</div>
+                            {debugInfo.lastError && (
+                                <div className="mb-2 text-red-600"><strong>Последняя ошибка:</strong> {debugInfo.lastError}</div>
+                            )}
+                            <div className="mt-2 pt-2 border-t border-gray-300">
+                                <div><strong>Текущий URL:</strong> {window.location.href}</div>
+                                <div><strong>Hash:</strong> {window.location.hash || 'Нет'}</div>
+                                <div><strong>Search:</strong> {window.location.search || 'Нет'}</div>
+                                <div><strong>Pathname:</strong> {window.location.pathname}</div>
+                            </div>
+                        </div>
+
                         {reconnectAttempt > 0 && (
                             <p className="text-sm text-gray-500 mt-2">
                                 Попытка подключения: {reconnectAttempt} из {maxReconnectAttempts}
                             </p>
                         )}
+
+                        {/* Кнопки для ручного тестирования */}
+                        <div className="mt-4 space-y-2">
+                            <button
+                                onClick={checkServerHealth}
+                                className="px-3 py-1 bg-blue-500 text-white rounded text-xs"
+                            >
+                                Проверить сервер
+                            </button>
+                            <button
+                                onClick={() => {
+                                    console.log('=== РУЧНАЯ ДИАГНОСТИКА ===');
+                                    console.log('websocketIdRef.current:', websocketIdRef.current);
+                                    console.log('debugInfo:', debugInfo);
+                                    console.log('socketRef.current:', socketRef.current);
+                                    if (socketRef.current) {
+                                        console.log('Socket readyState:', socketRef.current.readyState);
+                                    }
+
+                                    // Попытка ручного подключения
+                                    if (websocketIdRef.current) {
+                                        const testWs = new WebSocket(`wss://tracking.belektech.kg/ws/order/${websocketIdRef.current}/`);
+                                        testWs.onopen = () => console.log('✅ Тестовое WebSocket подключение успешно!');
+                                        testWs.onerror = (error) => console.error('❌ Ошибка тестового WebSocket:', error);
+                                        testWs.onclose = (event) => console.log('🔚 Тестовое WebSocket закрыто:', event.code, event.reason);
+                                        testWs.onmessage = (event) => console.log('📨 Тестовое сообщение:', event.data);
+                                    }
+                                }}
+                                className="px-3 py-1 bg-green-500 text-white rounded text-xs ml-2"
+                            >
+                                Тест в консоли
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -478,9 +631,17 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
                         </div>
                         <h3 className="text-xl font-bold mb-2">Ошибка</h3>
                         <p className="text-gray-600 mb-4">{error}</p>
+
+                        {/* Отладочная информация при ошибке */}
+                        <div className="mt-4 p-3 bg-red-50 rounded text-xs text-left">
+                            <div><strong>Последняя ошибка:</strong> {debugInfo.lastError}</div>
+                            <div><strong>WebSocket URL:</strong> {debugInfo.wsUrl}</div>
+                            <div><strong>Состояние:</strong> {debugInfo.websocketState}</div>
+                        </div>
+
                         <button
                             onClick={() => window.location.reload()}
-                            className="px-4 py-2 bg-blue-500 text-white rounded-full"
+                            className="px-4 py-2 bg-blue-500 text-white rounded-full mt-4"
                         >
                             Повторить
                         </button>
@@ -638,6 +799,23 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
                             </div>
                         </div>
                     </div>
+                </div>
+
+                {/* Отладочная панель в продакшене (показывается только при зажатии кнопки) */}
+                <div className="mt-4">
+                    <details className="bg-gray-100 rounded p-2">
+                        <summary className="text-xs cursor-pointer">🔧 Debug Info</summary>
+                        <div className="mt-2 text-xs space-y-1">
+                            <div><strong>WebSocket ID:</strong> {websocketIdRef.current}</div>
+                            <div><strong>Connected:</strong> {connected ? '✅' : '❌'}</div>
+                            <div><strong>WS State:</strong> {debugInfo.websocketState}</div>
+                            <div><strong>Attempts:</strong> {debugInfo.connectionAttempts}</div>
+                            <div><strong>Server:</strong> {debugInfo.serverReachable ? '✅' : '❌'}</div>
+                            {debugInfo.lastError && (
+                                <div className="text-red-600"><strong>Error:</strong> {debugInfo.lastError}</div>
+                            )}
+                        </div>
+                    </details>
                 </div>
 
                 {/* Status indicator */}
