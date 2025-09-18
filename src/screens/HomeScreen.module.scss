@@ -1,0 +1,68 @@
+.queue {
+  z-index: 20;
+  border: 3px solid #e0dfe4;
+  background: linear-gradient(123.54deg, #fafafa 31.88%, #e9e8ed 68.75%);
+
+  span {
+    font-weight: 400;
+    font-size: 14px;
+    line-height: 30px;
+    letter-spacing: 0px;
+    vertical-align: middle;
+  }
+
+  .text {
+    color: #8391b3;
+  }
+
+  .number {
+    color: #0b52c7;
+  }
+}
+
+.background_clock {
+  position: absolute;
+  width: 250px;
+  z-index: 0;
+  // margin-top: 150px;
+}
+
+.car {
+  width: 328px;
+  position: absolute;
+  top: -35px;
+}
+
+.bottom_nav {
+  background: linear-gradient(293.25deg, #dfe7f1 34.86%, #f3f2f7 67.93%);
+  border-radius: 48px;
+}
+
+.car_text {
+  color: #1e1e1e;
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 20px;
+  letter-spacing: 0px;
+  vertical-align: middle;
+}
+
+.car_detail_text {
+  color: #00000040;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 30px;
+  letter-spacing: 0px;
+  vertical-align: middle;
+}
+
+.success_text {
+  font-family: Gilroy;
+  font-weight: 500;
+  font-size: 16px;
+  vertical-align: middle;
+  color: #ffffff;
+  z-index: 40;
+  position: absolute;
+  bottom: 30px;
+}
