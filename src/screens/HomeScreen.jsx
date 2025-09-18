@@ -179,7 +179,7 @@ const HomeScreen = ({ websocketId: propWebsocketId }) => {
             socketRef.current.close();
         }
 
-        const wsUrl = `wss://unaa.com.kg/ws/order/${websocketIdRef.current}/`;
+        const wsUrl = `wss://test.belektech.kg/ws/order/${websocketIdRef.current}/`;
         console.log('Подключение к WebSocket:', wsUrl);
 
         try {
