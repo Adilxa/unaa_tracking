@@ -1,9 +1,20 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Allow the app to be hosted on tracking.unaa.com.kg
-  assetPrefix: "https://tracking.belektech.kg",
-  // Add basePath if your application is not hosted at the domain root
-  // basePath: '',
+  // Убираем assetPrefix - статические файлы должны загружаться с того же домена
+  // где размещен фронтенд (unaa-tracking.vercel.app)
+
+  // Если нужно, можно использовать условную логику:
+  // assetPrefix: process.env.NODE_ENV === 'production' ? '' : '',
+
+  // Настройки для изображений
+  images: {
+    unoptimized: true,
+  },
+
+  // Дополнительные настройки безопасности
+  experimental: {
+    esmExternals: false,
+  },
 };
 
 export default nextConfig;
